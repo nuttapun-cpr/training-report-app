@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบตรวจสอบข้อมูลการอบรมพนักงาน</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Chosen Palette: "Warm Neutral Harmony" -->
+    <!-- Application Structure Plan: The application flow is enhanced for robustness. 1. **Upload Phase:** A clear entry point for data. 2. **Mapping Phase (NEW):** After upload, the user is presented with a mandatory column mapping step. This eliminates the brittleness of heuristic column detection and empowers the user to align their data structure with the app's needs. This is the most critical fix for usability. 3. **Analysis Phase:** Once columns are mapped, the dashboard for company-specific analysis is displayed. This guided, three-step process (Upload -> Map -> Analyze) prevents common errors and makes the application far more reliable. -->
+    <!-- Visualization & Content Choices: 
+        - Report Info: Excel column headers. -> Goal: Allow user to define data structure. -> Viz/Presentation: HTML Select Dropdowns for mapping. -> Interaction: User selection. -> Justification: The most robust way to handle variable data schemas, fixing the core issue of the previous version. -> Library/Method: Custom JS.
+        - Report Info: List of unique companies. -> Goal: Allow user to select a company to analyze. -> Viz/Presentation: HTML Select Dropdown. -> Interaction: onchange event triggers data filtering. -> Justification: Standard UI for filtering. -> Library/Method: Custom JS.
+        - Report Info: Employee names and their courses. -> Goal: Show detailed records. -> Viz/Presentation: Grouped List/Cards. -> Interaction: Display updates on selection. -> Justification: Highly readable format for "who learned what?". -> Library/Method: Custom JS generating styled HTML.
+    -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+
+    <style>
+        body {
+            font-family: 'Sarabun', sans-serif;
+        }
+        .drop-zone {
+            border: 2px dashed #cbd5e1;
+            transition: background-color 0.2s, border-color 0.2s;
+        }
+        .drop-zone.dragover {
+            border-color: #38bdf8;
+            background-color: #f0f9ff;
+        }
+        #loader {
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #3498db;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+
+    <div class="container mx-auto p-4 md:p-8">
+        
+        <header class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-slate-700">ระบบตรวจสอบข้อมูลการอบรม</h1>
+            <p class="text-slate-500 mt-2">อัปโหลดไฟล์ Excel เพื่อดูข้อมูลการอบรมของพนักงานในแต่ละบริษัท</p>
+        </header>
+
+        <!-- Error Message Display -->
+        <div id="errorDisplay" class="hidden w-full max-w-2xl mx-auto mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded-lg"></div>
+
+        <!-- Upload Section -->
+        <div id="uploadSection" class="w-full max-w-2xl mx-auto">
+            <div id="dropZone" class="drop-zone bg-white rounded-lg p-8 md:p-12 text-center cursor-pointer">
+                <div class="flex flex-col items-center justify-center space-y-4">
+                    <i data-lucide="upload-cloud" class="w-16 h-16 text-slate-400"></i>
+                    <p class="text-lg font-medium">ลากไฟล์ .xlsx มาวางที่นี่ หรือ <span class="text-sky-500 font-semibold">กดเพื่อเลือกไฟล์</span></p>
+                </div>
+                <input type="file" id="fileInput" class="hidden" accept=".xlsx, .xls, .csv">
+            </div>
+            <div id="loaderContainer" class="hidden flex-col items-center justify-center mt-8">
+                <div id="loader"></div>
+                <p class="mt-4 text-slate-600">กำลังประมวลผลข้อมูล...</p>
+            </div>
+        </div>
+        
+        <!-- Column Mapping Section -->
+        <div id="mappingSection" class="hidden w-full max-w-2xl mx-auto bg-white p-6 rounded-lg shadow-sm">
+            <h3 class="text-xl font-semibold mb-1 text-slate-600">ขั้นตอนที่ 2: จับคู่คอลัมน์</h3>
+            <p class="text-slate-500 mb-6">กรุณาเลือกคอลัมน์จากไฟล์ Excel ของคุณให้ตรงกับข้อมูลที่ระบบต้องการ</p>
+            <div class="space-y-4">
+                <div>
+                    <label for="companyColumnSelect" class="block text-sm font-medium text-slate-700 mb-1">คอลัมน์สำหรับ "ชื่อบริษัท" <span class="text-red-500">*</span></label>
+                    <select id="companyColumnSelect" class="w-full bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-sky-500 focus:border-sky-500 block p-2.5"></select>
+                </div>
+                <div>
+                    <label for="nameColumnSelect" class="block text-sm font-medium text-slate-700 mb-1">คอลัมน์สำหรับ "ชื่อพนักงาน" <span class="text-red-500">*</span></label>
+                    <select id="nameColumnSelect" class="w-full bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-sky-500 focus:border-sky-500 block p-2.5"></select>
+                </div>
+                <div>
+                    <label for="courseColumnSelect" class="block text-sm font-medium text-slate-700 mb-1">คอลัมน์สำหรับ "ชื่อหลักสูตร" <span class="text-red-500">*</span></label>
+                    <select id="courseColumnSelect" class="w-full bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-sky-500 focus:border-sky-500 block p-2.5"></select>
+                </div>
+                <div>
+                    <label for="dateColumnSelect" class="block text-sm font-medium text-slate-700 mb-1">คอลัมน์สำหรับ "วันที่อบรม" (ถ้ามี)</label>
+                    <select id="dateColumnSelect" class="w-full bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-sky-500 focus:border-sky-500 block p-2.5"></select>
+                </div>
+            </div>
+            <button id="processDataBtn" class="mt-6 w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2.5 px-5 rounded-lg transition">ดำเนินการต่อ</button>
+        </div>
+
+        <!-- Dashboard Section -->
+        <div id="dashboardSection" class="hidden">
+            <div class="flex flex-col md:flex-row justify-between md:items-center mb-6 gap-4">
+                <h2 id="fileName" class="text-xl font-bold text-slate-700 truncate"></h2>
+                <button id="resetButton" class="bg-sky-500 hover:bg-sky-600 text-white font-bold py-2 px-4 rounded-lg flex items-center justify-center space-x-2 transition w-full md:w-auto">
+                    <i data-lucide="rotate-cw" class="w-4 h-4"></i>
+                    <span>อัปโหลดไฟล์ใหม่</span>
+                </button>
+            </div>
+
+            <section id="selector-section" class="mb-8 bg-white p-6 rounded-lg shadow-sm">
+                 <h3 class="text-xl font-semibold mb-4 text-slate-600">เลือกบริษัทเพื่อดูข้อมูล</h3>
+                 <select id="companySelect" class="w-full md:w-96 bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-sky-500 focus:border-sky-500 block p-2.5">
+                     <option value="">-- กรุณาเลือกบริษัท --</option>
+                 </select>
+            </section>
+            
+            <div id="resultsSection" class="hidden">
+                <section id="summary-section" class="mb-8">
+                    <div class="bg-white p-6 rounded-lg shadow-sm flex items-center space-x-4 border-l-4 border-sky-500">
+                        <div class="bg-sky-100 p-4 rounded-full"><i data-lucide="users" class="w-8 h-8 text-sky-600"></i></div>
+                        <div>
+                            <p class="text-slate-500 text-sm">จำนวนผู้ผ่านการอบรมในบริษัทนี้</p>
+                            <p id="totalTrainees" class="text-3xl font-bold">0</p>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="trainee-details-section" class="bg-white p-6 rounded-lg shadow-sm">
+                    <h3 class="text-xl font-semibold mb-4 text-slate-600">รายละเอียดการอบรมของพนักงาน</h3>
+                    <div id="traineeList" class="space-y-4"></div>
+                </section>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        lucide.createIcons();
+
+        // Global state
+        let excelData = [];
+        let headers = [];
+        let mappedColumns = {};
+
+        // DOM Elements
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const loaderContainer = document.getElementById('loaderContainer');
+        const errorDisplay = document.getElementById('errorDisplay');
+        
+        const uploadSection = document.getElementById('uploadSection');
+        const mappingSection = document.getElementById('mappingSection');
+        const dashboardSection = document.getElementById('dashboardSection');
+        const resultsSection = document.getElementById('resultsSection');
+
+        const companyColumnSelect = document.getElementById('companyColumnSelect');
+        const nameColumnSelect = document.getElementById('nameColumnSelect');
+        const courseColumnSelect = document.getElementById('courseColumnSelect');
+        const dateColumnSelect = document.getElementById('dateColumnSelect');
+        const processDataBtn = document.getElementById('processDataBtn');
+        
+        const resetButton = document.getElementById('resetButton');
+        const companySelect = document.getElementById('companySelect');
+
+        // Event Listeners
+        dropZone.addEventListener('click', () => fileInput.click());
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            handleFile(e.dataTransfer.files[0]);
+        });
+        fileInput.addEventListener('change', (e) => handleFile(e.target.files[0]));
+        resetButton.addEventListener('click', () => location.reload());
+        processDataBtn.addEventListener('click', processData);
+        companySelect.addEventListener('change', displayCompanyData);
+
+        function showError(message) {
+            errorDisplay.textContent = message;
+            errorDisplay.classList.remove('hidden');
+        }
+
+        function hideError() {
+            errorDisplay.classList.add('hidden');
+        }
+
+        function handleFile(file) {
+            if (!file) return;
+            hideError();
+            uploadSection.classList.add('hidden');
+            loaderContainer.classList.remove('hidden');
+            loaderContainer.classList.add('flex');
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+                    const firstSheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[firstSheetName];
+                    const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval:"" });
+                    
+                    if (jsonData.length < 2) {
+                        throw new Error("ไฟล์ Excel ต้องมีอย่างน้อย 1 หัวตาราง และ 1 แถวข้อมูล");
+                    }
+                    
+                    headers = jsonData[0].filter(h => h);
+                    excelData = XLSX.utils.sheet_to_json(worksheet, { defval:"" });
+                    
+                    document.getElementById('fileName').textContent = file.name;
+                    setupColumnMapping();
+
+                } catch (error) {
+                    console.error(error);
+                    showError("เกิดข้อผิดพลาด: " + error.message);
+                    loaderContainer.classList.add('hidden');
+                    uploadSection.classList.remove('hidden');
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function setupColumnMapping() {
+            loaderContainer.classList.add('hidden');
+            mappingSection.classList.remove('hidden');
+
+            const selects = [companyColumnSelect, nameColumnSelect, courseColumnSelect, dateColumnSelect];
+            const emptyOption = '<option value="">-- ไม่เลือก --</option>';
+            selects.forEach(select => {
+                select.innerHTML = '';
+                if (select.id === 'dateColumnSelect') {
+                    select.innerHTML += emptyOption;
+                } else {
+                    select.innerHTML += '<option value="">-- กรุณาเลือก --</option>';
+                }
+                headers.forEach(header => {
+                    const option = document.createElement('option');
+                    option.value = header;
+                    option.textContent = header;
+                    select.appendChild(option);
+                });
+            });
+
+            preselectOption(companyColumnSelect, ['บริษัท', 'company']);
+            preselectOption(nameColumnSelect, ['ชื่อ', 'name']);
+            preselectOption(courseColumnSelect, ['หลักสูตร', 'course', 'อบรม']);
+            preselectOption(dateColumnSelect, ['วันที่', 'date']);
+        }
+
+        function preselectOption(selectElement, keywords) {
+            for (const option of selectElement.options) {
+                const lowerOption = option.value.toLowerCase();
+                if (keywords.some(kw => lowerOption.includes(kw))) {
+                    option.selected = true;
+                    break;
+                }
+            }
+        }
+
+        function processData() {
+            const companyCol = companyColumnSelect.value;
+            const nameCol = nameColumnSelect.value;
+            const courseCol = courseColumnSelect.value;
+            const dateCol = dateColumnSelect.value;
+
+            if (!companyCol || !nameCol || !courseCol) {
+                showError("กรุณาเลือกคอลัมน์ที่จำเป็น (*) ให้ครบทุกรายการ");
+                setTimeout(hideError, 3000);
+                return;
+            }
+
+            const selectedRequired = [companyCol, nameCol, courseCol];
+            if (new Set(selectedRequired).size < 3) {
+                 showError("กรุณาเลือกคอลัมน์ที่จำเป็น (*) ให้แตกต่างกัน");
+                 setTimeout(hideError, 3000);
+                 return;
+            }
+
+            mappedColumns = {
+                company: companyCol,
+                name: nameCol,
+                course: courseCol,
+                date: dateCol
+            };
+
+            mappingSection.classList.add('hidden');
+            dashboardSection.classList.remove('hidden');
+            populateCompanySelector();
+        }
+
+        function populateCompanySelector() {
+            const companies = [...new Set(excelData.map(row => row[mappedColumns.company]).filter(Boolean))];
+            companies.sort();
+            
+            companySelect.innerHTML = '<option value="">-- กรุณาเลือกบริษัท --</option>';
+            companies.forEach(company => {
+                const option = document.createElement('option');
+                option.value = company;
+                option.textContent = company;
+                companySelect.appendChild(option);
+            });
+        }
+
+        function displayCompanyData() {
+            const selectedCompany = companySelect.value;
+            if (!selectedCompany) {
+                resultsSection.classList.add('hidden');
+                return;
+            }
+
+            resultsSection.classList.remove('hidden');
+
+            const companyData = excelData.filter(row => row[mappedColumns.company] === selectedCompany);
+            
+            const trainees = companyData.reduce((acc, row) => {
+                const name = row[mappedColumns.name];
+                const course = row[mappedColumns.course];
+                const date = mappedColumns.date ? row[mappedColumns.date] : null;
+
+                if (name && course) {
+                    if (!acc[name]) acc[name] = [];
+                    acc[name].push({ course: course, date: date });
+                }
+                return acc;
+            }, {});
+
+            const traineeNames = Object.keys(trainees);
+            document.getElementById('totalTrainees').textContent = traineeNames.length.toLocaleString();
+
+            const traineeListDiv = document.getElementById('traineeList');
+            traineeListDiv.innerHTML = '';
+
+            if (traineeNames.length === 0) {
+                traineeListDiv.innerHTML = '<p class="text-center text-slate-500">ไม่พบข้อมูลการอบรมสำหรับบริษัทนี้</p>';
+                return;
+            }
+
+            traineeNames.sort().forEach(name => {
+                const courses = trainees[name];
+                const card = document.createElement('div');
+                card.className = 'border border-slate-200 p-4 rounded-lg bg-slate-50';
+                
+                let coursesHTML = courses.map(item => {
+                    let displayDate = '';
+                    if (item.date) {
+                        try {
+                            if (item.date instanceof Date && !isNaN(item.date)) {
+                                displayDate = item.date.toLocaleDateString('th-TH', {
+                                    year: 'numeric',
+                                    month: 'short',
+                                    day: 'numeric',
+                                });
+                            }
+                        } catch (e) {
+                            // Could not parse, do nothing
+                        }
+                    }
+
+                    const dateHTML = displayDate ? `<span class="text-xs text-slate-500 ml-2 whitespace-nowrap">(${displayDate})</span>` : '';
+                    return `
+                        <li class="flex items-center justify-between py-1">
+                            <div class="flex items-start">
+                                <i data-lucide="award" class="w-4 h-4 text-green-500 mr-2 mt-1 flex-shrink-0"></i>
+                                <span>${item.course}</span>
+                            </div>
+                            ${dateHTML}
+                        </li>
+                    `;
+                }).join('');
+
+                card.innerHTML = `
+                    <h4 class="font-semibold text-slate-800 flex items-center mb-2">
+                        <i data-lucide="user" class="w-5 h-5 text-slate-500 mr-2"></i>
+                        ${name}
+                    </h4>
+                    <ul class="space-y-1 text-slate-600 pl-2 divide-y divide-slate-200">
+                        ${coursesHTML}
+                    </ul>
+                `;
+                traineeListDiv.appendChild(card);
+            });
+            lucide.createIcons();
+        }
+
+    </script>
+</body>
+</html>
